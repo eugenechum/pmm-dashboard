@@ -3349,8 +3349,8 @@ function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [selected, setSelected] = useState(null);
 
-  // Detect admin mode from URL: ?admin=PMM2024!
-  const isAdmin = new URLSearchParams(window.location.search).get("admin") === "__BACKEND_PASSWORD__";
+  // Detect admin mode from URL: ?admin=PMM2024
+  const isAdmin = new URLSearchParams(window.location.search).get("admin") === "PMM2024";
 
   // Fetch jobs from backend on app load
   useEffect(() => {
