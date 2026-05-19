@@ -2070,7 +2070,8 @@ function Sidebar({
   activeTab,
   onTab,
   counts,
-  datasetLabel
+  datasetLabel,
+  isAdmin
 }) {
   const tabs = [{
     key: "overview",
@@ -2115,7 +2116,7 @@ function Sidebar({
     className: "sidebar-item-label"
   }, t.label)), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-item-sub"
-  }, t.sub))), /*#__PURE__*/React.createElement("div", {
+  }, t.sub))), isAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "sidebar-section-divider"
   }, /*#__PURE__*/React.createElement("span", {
     className: "label"
@@ -2130,7 +2131,7 @@ function Sidebar({
     className: "sidebar-item-label"
   }, "Upload ZIP")), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-item-sub"
-  }, "ingest \xB7 classify"))), /*#__PURE__*/React.createElement("div", {
+  }, "ingest \xB7 classify")))), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-foot"
   }, /*#__PURE__*/React.createElement("div", {
     className: "label"
@@ -3064,8 +3065,8 @@ function AdminTab({
     const sizeKb = Math.round(file.size / 1024);
     const sizeStr = sizeKb > 1024 ? (sizeKb / 1024).toFixed(1) + " MB" : sizeKb + " KB";
     try {
-      const API_PASSWORD = 'changeme';
-      const API_URL = 'http://localhost:3000';
+      const API_PASSWORD = 'PMM2024!';
+      const API_URL = 'https://pmm-dashboard-production.up.railway.app';
       const formData = new FormData();
       formData.append('file', file);
       formData.append('uploader', 'Eugene');
@@ -3348,12 +3349,15 @@ function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [selected, setSelected] = useState(null);
 
+  // Detect admin mode from URL: ?admin=PMM2024!
+  const isAdmin = new URLSearchParams(window.location.search).get("admin") === "__BACKEND_PASSWORD__";
+
   // Fetch jobs from backend on app load
   useEffect(() => {
     (async () => {
       try {
-        const API_PASSWORD = 'changeme';
-        const API_URL = 'http://localhost:3000';
+        const API_PASSWORD = 'PMM2024!';
+        const API_URL = 'https://pmm-dashboard-production.up.railway.app';
         const res = await fetch(API_URL + '/api/jobs', {
           headers: {
             'X-Password': API_PASSWORD
@@ -3476,7 +3480,8 @@ function App() {
     activeTab: activeTab,
     onTab: setActiveTab,
     counts: counts,
-    datasetLabel: datasetLabel
+    datasetLabel: datasetLabel,
+    isAdmin: isAdmin
   }), /*#__PURE__*/React.createElement("div", {
     className: "main-area"
   }, /*#__PURE__*/React.createElement(StatusStrip, {
