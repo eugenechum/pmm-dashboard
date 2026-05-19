@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "ninja_fieldsight_pmm_dashboard.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/ninja_fieldsight_pmm_dashboard.html"
+    }
+  ]
+}
