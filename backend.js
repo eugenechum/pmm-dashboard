@@ -1,7 +1,7 @@
 /**
- * Ninja FieldSight PMM Dashboard Backend
- * - File storage on Railway disk (data.json)
- * - No Google Sheets/Firebase needed
+ * Ninja FieldSight PMM Dashboard Backend — Phase 1-full
+ * - Supabase database for persistent job storage
+ * - Supabase storage for photos
  * - Password-protected endpoints
  */
 
@@ -9,8 +9,7 @@ const express = require('express');
 const cors = require('cors');
 const busboy = require('busboy');
 const JSZip = require('jszip');
-const fs = require('fs');
-const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
@@ -19,48 +18,13 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const PASSWORD = process.env.UPLOAD_PASSWORD || 'changeme';
-const DATA_FILE = path.join(__dirname, 'data.json');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const BUCKET = 'pmm photos';
 
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 console.log(`FieldSight backend starting on port ${PORT}`);
-console.log(`Password: ${PASSWORD === 'changeme' ? '⚠️  DEFAULT (change in .env!)' : '✓ Custom'}`);
-
-// ============================================================
-// FILE STORAGE
-// ============================================================
-
-function readData() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return { batches: [] };
-    const txt = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(txt);
-  } catch (e) {
-    console.error('Read error:', e.message);
-    return { batches: [] };
-  }
-}
-
-function writeData(data) {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (e) {
-    console.error('Write error:', e.message);
-    return false;
-  }
-}
-
-function getMergedJobs() {
-  const data = readData();
-  const map = {};
-  (data.batches || []).forEach(b => {
-    (b.jobs || []).forEach(j => { map[String(j.jobId)] = j; });
-  });
-  return Object.values(map);
-}
-
-// ============================================================
-// ZIP PARSER (same as frontend)
-// ============================================================
+console.log(`Supabase: ${SUPABASE_URL ? '✓ configured' : '✗ MISSING'}`);
 
 function parseCSV(text) {
   const rows = [];
@@ -68,10 +32,7 @@ function parseCSV(text) {
   while (i < text.length) {
     const c = text[i];
     if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      }
+      if (c === '"') { if (text[i+1] === '"') { field += '"'; i += 2; continue; } inQuotes = false; i++; continue; }
       field += c; i++; continue;
     }
     if (c === '"') { inQuotes = true; i++; continue; }
@@ -81,17 +42,14 @@ function parseCSV(text) {
     field += c; i++;
   }
   if (field !== '' || row.length) row.push(field);
-  if (rows.length === 0) return [];
+  if (!rows.length) return [];
   const headers = rows[0];
   return rows.slice(1).filter(r => r.length && !(r.length === 1 && r[0] === '')).map(r => {
-    const o = {};
-    headers.forEach((h, idx) => { o[h] = r[idx] || ''; });
-    return o;
+    const o = {}; headers.forEach((h, idx) => { o[h] = r[idx] || ''; }); return o;
   });
 }
 
 const BRANDS = ['Dunhill', 'Mevius', 'LD', 'Marlboro', 'Chesterfield'];
-const PMM_BRANDS = ['Marlboro', 'Chesterfield'];
 
 function parseBrandReply(text) {
   if (!text) return null;
@@ -99,94 +57,54 @@ function parseBrandReply(text) {
   const lower = text.toLowerCase();
   const numbered = [...lower.matchAll(/([1-5])\s*[.):,\-]?\s*(ya|yes|y|ada|jual|tak|no|n|tidak|takde|tiada)/g)];
   if (numbered.length >= 3) {
-    let foundAny = false;
-    numbered.forEach(m => {
-      const idx = parseInt(m[1], 10) - 1;
-      const tok = m[2];
-      const isYes = ['ya', 'yes', 'y', 'ada', 'jual'].includes(tok);
-      result[BRANDS[idx]] = isYes;
-      foundAny = true;
-    });
-    if (foundAny) {
-      BRANDS.forEach(b => { if (result[b] === null) result[b] = false; });
-      return result;
-    }
+    let any = false;
+    numbered.forEach(m => { result[BRANDS[parseInt(m[1])-1]] = ['ya','yes','y','ada','jual'].includes(m[2]); any = true; });
+    if (any) { BRANDS.forEach(b => { if (result[b] === null) result[b] = false; }); return result; }
   }
-  let foundAny = false;
-  BRANDS.forEach(b => {
-    const re = new RegExp('\\b' + b.toLowerCase() + '\\b');
-    if (re.test(lower)) { result[b] = true; foundAny = true; }
-  });
-  if (foundAny) {
-    if (/\b(takde|tiada|none|no\s+cigarettes|tak\s+jual|nothing)\b/.test(lower)) {
-      BRANDS.forEach(b => { result[b] = false; });
-      return result;
-    }
-    BRANDS.forEach(b => { if (result[b] === null) result[b] = false; });
-    return result;
-  }
-  if (/\b(takde\s+semua|none|tak\s+jual|tiada|no\s+stock|takde)\b/.test(lower)) {
-    BRANDS.forEach(b => { result[b] = false; });
-    return result;
-  }
+  let any = false;
+  BRANDS.forEach(b => { if (new RegExp('\\b'+b.toLowerCase()+'\\b').test(lower)) { result[b] = true; any = true; } });
+  if (any) { BRANDS.forEach(b => { if (result[b] === null) result[b] = false; }); return result; }
+  if (/\b(takde\s+semua|none|tak\s+jual|tiada|no\s+stock|takde)\b/.test(lower)) { BRANDS.forEach(b => { result[b] = false; }); return result; }
   return null;
 }
 
 function classifyOutcome(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.Role !== 'ai') continue;
-    const text = (m.Message || '').toLowerCase();
-    if (text.includes('lead captured successfully') || text.includes('maklumat prospek berjaya')) return 'INTERESTED';
-    if (text.includes('already selling philip morris') || text.includes('sudah menjual produk philip morris')) return 'ALREADY_SELLING';
-    if (text.includes('photo was declined') || text.includes('foto ditolak')) return 'NOT_INTERESTED_NO_PHOTO';
-    if (text.includes('recorded as not interested') || text.includes('direkodkan sebagai tidak berminat')) return 'NOT_INTERESTED';
+    if (messages[i].Role !== 'ai') continue;
+    const t = (messages[i].Message || '').toLowerCase();
+    if (t.includes('lead captured successfully') || t.includes('maklumat prospek berjaya')) return 'INTERESTED';
+    if (t.includes('already selling philip morris') || t.includes('sudah menjual produk philip morris')) return 'ALREADY_SELLING';
+    if (t.includes('photo was declined') || t.includes('foto ditolak')) return 'NOT_INTERESTED_NO_PHOTO';
+    if (t.includes('recorded as not interested') || t.includes('direkodkan sebagai tidak berminat')) return 'NOT_INTERESTED';
   }
   return null;
 }
 
 function findOwnerInfo(messages) {
-  let namePromptIdx = -1, contactPromptIdx = -1;
+  let ni = -1, ci = -1;
   for (let i = 0; i < messages.length; i++) {
     if (messages[i].Role !== 'ai') continue;
-    const text = (messages[i].Message || '').toLowerCase();
-    if (namePromptIdx === -1 && (text.includes("enter the store owner's name") || text.includes('masukkan nama pemilik kedai'))) {
-      namePromptIdx = i;
-    }
-    if (contactPromptIdx === -1 && (text.includes("enter the store owner's contact") || text.includes('masukkan nombor telefon pemilik'))) {
-      contactPromptIdx = i;
-    }
+    const t = (messages[i].Message || '').toLowerCase();
+    if (ni === -1 && (t.includes("enter the store owner's name") || t.includes('masukkan nama pemilik kedai'))) ni = i;
+    if (ci === -1 && (t.includes("enter the store owner's contact") || t.includes('masukkan nombor telefon pemilik'))) ci = i;
   }
   let name = null, contact = null;
-  if (namePromptIdx !== -1) {
-    for (let j = namePromptIdx + 1; j < messages.length; j++) {
+  if (ni !== -1) {
+    for (let j = ni+1; j < Math.min(ni+10, messages.length); j++) {
       const next = messages[j];
       if (next.Role !== 'human' || next.Message.startsWith('[Image:')) continue;
       const v = next.Message.trim();
-      if (/^(ya|yes|y|tidak|tak|no|n|berminat|minat|tak\s*berminat|nak\s+jual)$/i.test(v)) continue;
+      if (/^(ya|yes|y|tidak|tak|no|n|berminat|minat)$/i.test(v)) continue;
       if (/^\+?\d[\d\s\-]{6,}$/.test(v)) continue;
-      if (j > namePromptIdx + 10) break;
-      name = v;
-      break;
+      name = v; break;
     }
   }
-  if (contactPromptIdx !== -1) {
-    for (let j = contactPromptIdx + 1; j < messages.length; j++) {
+  if (ci !== -1) {
+    for (let j = ci+1; j < messages.length; j++) {
       const next = messages[j];
       if (next.Role !== 'human' || next.Message.startsWith('[Image:')) continue;
       const v = next.Message.trim();
-      if (!/^\+?\d[\d\s\-]{6,}$/.test(v)) continue;
-      let pastClose = false;
-      for (let k = contactPromptIdx + 1; k < j; k++) {
-        if (messages[k].Role === 'ai') {
-          const t = (messages[k].Message || '').toLowerCase();
-          if (t.includes('survey complete') || t.includes('tinjauan selesai')) {
-            pastClose = true; break;
-          }
-        }
-      }
-      if (pastClose) break;
-      contact = v;
+      if (/^\+?\d[\d\s\-]{6,}$/.test(v)) { contact = v; break; }
     }
   }
   return { name, contact };
@@ -194,18 +112,14 @@ function findOwnerInfo(messages) {
 
 function findBrandReply(messages) {
   for (let i = 0; i < messages.length - 1; i++) {
-    const m = messages[i];
-    if (m.Role !== 'ai') continue;
-    const text = m.Message || '';
+    if (messages[i].Role !== 'ai') continue;
+    const text = messages[i].Message || '';
     if (text.includes('1. Dunhill') || text.includes('**1. Dunhill**')) {
-      for (let j = i + 1; j < messages.length; j++) {
+      for (let j = i+1; j < messages.length; j++) {
         const next = messages[j];
         if (next.Role !== 'human' || next.Message.startsWith('[Image:')) continue;
         const v = next.Message.trim().toLowerCase();
-        const hasNumbered = /\b[1-5]\b.*?(yes|no|ya|tak|tidak)/i.test(v);
-        const hasBrand = /(dunhill|mevius|marlboro|chesterfield|\bld\b)/i.test(v);
-        const hasNegation = /\b(takde|tiada|none|tak\s*jual)\b/i.test(v);
-        if (hasNumbered || hasBrand || hasNegation) return next.Message;
+        if (/\b[1-5]\b.*?(yes|no|ya|tak|tidak)/i.test(v) || /(dunhill|mevius|marlboro|chesterfield|\bld\b)/i.test(v) || /\b(takde|tiada|none|tak\s*jual)\b/i.test(v)) return next.Message;
       }
     }
   }
@@ -214,20 +128,14 @@ function findBrandReply(messages) {
 
 function findDuration(messages) {
   for (let i = 0; i < messages.length - 1; i++) {
-    const m = messages[i];
-    if (m.Role !== 'ai') continue;
-    const text = (m.Message || '').toLowerCase();
-    if (text.includes('how long has this store not been selling') || text.includes('berapa lama kedai ini sudah tidak menjual')) {
-      for (let j = i + 1; j < messages.length; j++) {
+    if (messages[i].Role !== 'ai') continue;
+    const t = (messages[i].Message || '').toLowerCase();
+    if (t.includes('how long has this store not been selling') || t.includes('berapa lama kedai ini sudah tidak menjual')) {
+      for (let j = i+1; j < messages.length; j++) {
         const next = messages[j];
-        if (next.Role !== 'ai') {
-          const nt = (next.Message || '').toLowerCase();
-          if (nt.includes('interested in selling') || nt.includes('berminat untuk menjual') || nt.includes('survey complete')) break;
-        }
         if (next.Role === 'human' && !next.Message.startsWith('[Image:')) {
           const v = next.Message.trim();
-          if (/^\d\s+(yes|no|ya|tak|tidak)/i.test(v)) continue;
-          if (/^(ya|yes|y|tidak|tak|no|n|berminat|minat)$/i.test(v)) continue;
+          if (/^\d\s+(yes|no|ya|tak|tidak)/i.test(v) || /^(ya|yes|y|tidak|tak|no|n|berminat|minat)$/i.test(v)) continue;
           return v;
         }
       }
@@ -236,7 +144,7 @@ function findDuration(messages) {
   return null;
 }
 
-function extractPhotos(messages) {
+function extractPhotoFilenames(messages) {
   const photos = [];
   messages.forEach(m => {
     if (m.Role !== 'human') return;
@@ -246,84 +154,74 @@ function extractPhotos(messages) {
   return photos;
 }
 
-async function processZip(zipBuffer) {
+async function processZip(zipBuffer, batchId) {
   const zip = await JSZip.loadAsync(zipBuffer);
   const csvNames = Object.keys(zip.files).filter(f => f.toLowerCase().endsWith('.csv'));
-
   if (!csvNames.some(n => /jobs\.csv$/i.test(n))) throw new Error('No jobs.csv found');
   if (!csvNames.some(n => /conversation\.csv$/i.test(n))) throw new Error('No conversation.csv found');
 
-  const jobsFile = csvNames.find(n => /jobs\.csv$/i.test(n));
-  const jobsCsv = await zip.files[jobsFile].async('string');
+  const jobsCsv = await zip.files[csvNames.find(n => /jobs\.csv$/i.test(n))].async('string');
+  const convCsv = await zip.files[csvNames.find(n => /conversation\.csv$/i.test(n))].async('string');
   const jobs = parseCSV(jobsCsv);
-
-  const convFile = csvNames.find(n => /conversation\.csv$/i.test(n));
-  const convCsv = await zip.files[convFile].async('string');
   const allMessages = parseCSV(convCsv);
 
   const byJob = {};
-  allMessages.forEach(m => {
-    const jid = m['Job ID'];
-    if (!byJob[jid]) byJob[jid] = [];
-    byJob[jid].push(m);
-  });
+  allMessages.forEach(m => { const jid = m['Job ID']; if (!byJob[jid]) byJob[jid] = []; byJob[jid].push(m); });
   Object.keys(byJob).forEach(jid => {
-    byJob[jid].sort((a, b) => {
-      if (a['Created At'] !== b['Created At']) return a['Created At'].localeCompare(b['Created At']);
-      return (+a['Message ID']) - (+b['Message ID']);
-    });
+    byJob[jid].sort((a, b) => a['Created At'] !== b['Created At'] ? a['Created At'].localeCompare(b['Created At']) : (+a['Message ID']) - (+b['Message ID']));
   });
 
+  // Upload photos to Supabase storage
+  const photoUrls = {};
+  const imageFiles = {};
+  Object.keys(zip.files).forEach(name => {
+    if (/\.(jpg|jpeg|png)$/i.test(name)) imageFiles[name.split('/').pop()] = zip.files[name];
+  });
+
+  for (const [filename, file] of Object.entries(imageFiles)) {
+    try {
+      const buffer = await file.async('nodebuffer');
+      const storagePath = `batch_${batchId}/${filename}`;
+      const { error } = await supabase.storage.from(BUCKET).upload(storagePath, buffer, { contentType: 'image/jpeg', upsert: true });
+      if (!error) {
+        const { data } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+        photoUrls[filename] = data.publicUrl;
+      } else {
+        console.error('Photo upload error:', filename, error.message);
+      }
+    } catch (e) { console.error('Photo error:', filename, e.message); }
+  }
+
+  // Parse jobs
   const derived = [];
   for (const j of jobs) {
     const jobId = j['Job ID'];
     const msgs = byJob[jobId] || [];
     const status = (j['Status'] || '').toLowerCase();
-    const photos = extractPhotos(msgs);
-
+    const photoFilenames = extractPhotoFilenames(msgs);
     let outcome = null, brands = { Dunhill: null, Mevius: null, LD: null, Marlboro: null, Chesterfield: null };
     let ownerName = null, ownerContact = null, duration = null;
-
     if (status === 'success' && msgs.length > 0) {
       outcome = classifyOutcome(msgs);
-      const brandReply = findBrandReply(msgs);
-      if (brandReply) {
-        const parsed = parseBrandReply(brandReply);
-        if (parsed) brands = parsed;
-      }
-      if (outcome === 'INTERESTED') {
-        const info = findOwnerInfo(msgs);
-        ownerName = info.name;
-        ownerContact = info.contact;
-      }
-      if (outcome === 'INTERESTED' || outcome === 'NOT_INTERESTED' || outcome === 'NOT_INTERESTED_NO_PHOTO') {
-        duration = findDuration(msgs);
-      }
+      const br = findBrandReply(msgs); if (br) { const p = parseBrandReply(br); if (p) brands = p; }
+      if (outcome === 'INTERESTED') { const info = findOwnerInfo(msgs); ownerName = info.name; ownerContact = info.contact; }
+      if (['INTERESTED','NOT_INTERESTED','NOT_INTERESTED_NO_PHOTO'].includes(outcome)) duration = findDuration(msgs);
     }
-
-    const date = (j['Date'] || (j['Created At'] || '').slice(0, 10) || '').trim();
-    const createdAt = (j['Created At'] || '').trim();
-
     derived.push({
-      jobId: jobId,
-      date: date,
-      region: 'Unknown',
-      city: 'Unknown',
-      status: status,
-      outcome: outcome,
-      brands: brands,
-      interestedInPmm: outcome === 'INTERESTED' ? true : (outcome === 'NOT_INTERESTED' || outcome === 'NOT_INTERESTED_NO_PHOTO') ? false : null,
-      ownerName: ownerName,
-      ownerContact: ownerContact,
-      howLongNoPmm: duration,
-      photoShopFront: photos[0] || null,
-      photoDispenser: photos[1] || null,
-      createdAt: createdAt,
-      _agent: j['Telegram First Name'] || null,
+      job_id: jobId,
+      date: (j['Date'] || (j['Created At'] || '').slice(0,10)).trim(),
+      region: 'Unknown', city: 'Unknown', status, outcome,
+      dunhill: brands.Dunhill, mevius: brands.Mevius, ld: brands.LD, marlboro: brands.Marlboro, chesterfield: brands.Chesterfield,
+      interested_in_pmm: outcome === 'INTERESTED' ? true : ['NOT_INTERESTED','NOT_INTERESTED_NO_PHOTO'].includes(outcome) ? false : null,
+      owner_name: ownerName, owner_contact: ownerContact, how_long_no_pmm: duration,
+      photo_shop_front: photoFilenames[0] ? (photoUrls[photoFilenames[0]] || photoFilenames[0]) : null,
+      photo_dispenser: photoFilenames[1] ? (photoUrls[photoFilenames[1]] || photoFilenames[1]) : null,
+      created_at: (j['Created At'] || '').trim(),
+      agent: j['Telegram First Name'] || null,
+      batch_id: batchId,
     });
   }
-
-  return { jobs: derived, meta: { totalJobs: jobs.length, totalMessages: allMessages.length } };
+  return { jobs: derived, photoCount: Object.keys(photoUrls).length };
 }
 
 // ============================================================
@@ -331,74 +229,44 @@ async function processZip(zipBuffer) {
 // ============================================================
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
+  res.json({ ok: true, timestamp: new Date().toISOString(), supabase: !!SUPABASE_URL });
 });
 
-app.get('/api/jobs', (req, res) => {
-  const password = req.headers['x-password'];
-  if (password !== PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
-  
+app.get('/api/jobs', async (req, res) => {
+  if (req.headers['x-password'] !== PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const jobs = getMergedJobs();
-    res.json({ jobs, count: jobs.length, source: 'file' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    const { data, error } = await supabase.from('jobs').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    const jobs = (data || []).map(r => ({
+      jobId: r.job_id, date: r.date, region: r.region, city: r.city, status: r.status, outcome: r.outcome,
+      brands: { Dunhill: r.dunhill, Mevius: r.mevius, LD: r.ld, Marlboro: r.marlboro, Chesterfield: r.chesterfield },
+      interestedInPmm: r.interested_in_pmm, ownerName: r.owner_name, ownerContact: r.owner_contact,
+      howLongNoPmm: r.how_long_no_pmm, photoShopFront: r.photo_shop_front, photoDispenser: r.photo_dispenser,
+      createdAt: r.created_at, _agent: r.agent,
+    }));
+    res.json({ jobs, count: jobs.length, source: 'supabase' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/upload', (req, res) => {
-  const password = req.headers['x-password'];
-  if (password !== PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
-
-  const bb = busboy({ headers: req.headers });
-  let fileBuffer = null;
-  let uploaderName = null;
-
-  bb.on('file', (fieldname, file) => {
-    const chunks = [];
-    file.on('data', chunk => chunks.push(chunk));
-    file.on('end', () => { fileBuffer = Buffer.concat(chunks); });
-  });
-
-  bb.on('field', (fieldname, val) => {
-    if (fieldname === 'uploader') uploaderName = val;
-  });
-
+  if (req.headers['x-password'] !== PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
+  const bb = busboy({ headers: req.headers, limits: { fileSize: 200 * 1024 * 1024 } });
+  let fileBuffer = null, uploaderName = 'unknown';
+  bb.on('file', (f, file) => { const chunks = []; file.on('data', c => chunks.push(c)); file.on('end', () => { fileBuffer = Buffer.concat(chunks); }); });
+  bb.on('field', (f, val) => { if (f === 'uploader') uploaderName = val; });
   bb.on('close', async () => {
     if (!fileBuffer) return res.status(400).json({ error: 'No file uploaded' });
-
     try {
-      const parsed = await processZip(fileBuffer);
-      const data = readData();
-      const batchId = (data.batches || []).length + 1;
-      const batch = {
-        batchId,
-        uploaderName: uploaderName || 'unknown',
-        uploadedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-        jobCount: parsed.jobs.length,
-        jobs: parsed.jobs,
-      };
-      if (!data.batches) data.batches = [];
-      data.batches.push(batch);
-      writeData(data);
-
-      res.json({
-        ok: true,
-        batchId,
-        jobsAdded: parsed.jobs.length,
-        uploaderName: uploaderName || 'unknown',
-      });
-    } catch (e) {
-      res.status(400).json({ error: e.message });
-    }
+      const { data: uploads } = await supabase.from('uploads').select('batch_id').order('batch_id', { ascending: false }).limit(1);
+      const batchId = uploads && uploads.length > 0 ? uploads[0].batch_id + 1 : 1;
+      const { jobs, photoCount } = await processZip(fileBuffer, batchId);
+      const { error } = await supabase.from('jobs').upsert(jobs, { onConflict: 'job_id' });
+      if (error) throw error;
+      await supabase.from('uploads').insert([{ uploader_name: uploaderName, job_count: jobs.length, batch_id: batchId }]);
+      res.json({ ok: true, batchId, jobsUploaded: jobs.length, photosUploaded: photoCount });
+    } catch (e) { console.error('Upload error:', e); res.status(400).json({ error: e.message }); }
   });
-
   req.pipe(bb);
 });
 
-app.listen(PORT, () => {
-  console.log(`✓ Listening on port ${PORT}`);
-  console.log(`✓ GET  /api/jobs (password required)`);
-  console.log(`✓ POST /upload (password required)`);
-  console.log(`✓ Data stored in: ${DATA_FILE}`);
-});
+app.listen(PORT, () => { console.log(`✓ Listening on port ${PORT}`); });
