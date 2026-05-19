@@ -1,0 +1,139 @@
+NINJA FIELDSIGHT PMM DASHBOARD — DEPLOYMENT CHECKLIST
+======================================================
+
+Follow these steps in order. Estimated time: 20 minutes.
+
+BEFORE YOU START:
+=================
+□ You have a GitHub account (github.com)
+□ You have internet connection
+□ You have the files from /mnt/user-data/outputs/
+
+PART 1: BACKEND (Railway) — 10 minutes
+======================================
+
+□ Step 1: Create Railway account
+  - Go to https://railway.app
+  - Sign up with GitHub
+  - Create new empty project
+
+□ Step 2: Create GitHub repo
+  - Go to https://github.com/new
+  - Repo name: fieldsight-backend (or your choice)
+  - Click "Create repository"
+
+□ Step 3: Push code to GitHub
+  - In terminal, in the folder with backend.js:
+    git init
+    git add backend.js package.json .env.example .gitignore README.md
+    git commit -m "Initial commit"
+    git remote add origin https://github.com/YOUR_USERNAME/fieldsight-backend.git
+    git branch -M main
+    git push -u origin main
+
+□ Step 4: Connect GitHub to Railway
+  - In Railway: "New" → "GitHub repo"
+  - Select fieldsight-backend repo
+  - Railway auto-deploys (takes ~2 min)
+
+□ Step 5: Set environment variable
+  - In Railway: Project → "Variables"
+  - Add: UPLOAD_PASSWORD = your_strong_password (e.g., MySecure123!)
+  - Save (Railway auto-redeploys)
+
+□ Step 6: Get backend URL
+  - In Railway: "Deployments" → latest → click it
+  - Top of page shows URL like: https://fieldsight-abc123.railway.app
+  - SAVE THIS URL (you'll need it next)
+
+□ Step 7: Test backend
+  - Open browser: https://fieldsight-abc123.railway.app/health
+  - Should see: {"ok":true,"timestamp":"..."}
+
+PART 2: FRONTEND (Vercel) — 10 minutes
+======================================
+
+□ Step 1: Build dashboard HTML
+  - You need: backend URL from Part 1, UPLOAD_PASSWORD
+  - In terminal:
+    BACKEND_URL="https://fieldsight-abc123.railway.app" \
+    BACKEND_PASSWORD="MySecure123!" \
+    python3 assemble_v4.py
+  - This creates/updates ninja_fieldsight_pmm_dashboard.html
+
+□ Step 2: Create Vercel account
+  - Go to https://vercel.com
+  - Sign up (free, use GitHub)
+
+□ Step 3: Deploy to Vercel
+  - Go to https://vercel.com
+  - Click "Add New" → "Project"
+  - Or drag & drop ninja_fieldsight_pmm_dashboard.html
+  - Click "Deploy"
+  - Wait for deployment (takes ~30 sec)
+
+□ Step 4: Get frontend URL
+  - After deploy, you'll see a URL like: https://fieldsight-abc123.vercel.app
+  - SAVE THIS URL (this is what you'll share with your team)
+
+PART 3: TEST — 5 minutes
+========================
+
+□ Step 1: Test backend is up
+  - In browser: https://fieldsight-abc123.railway.app/health
+  - Should see JSON response
+
+□ Step 2: Test frontend loads
+  - In browser: https://fieldsight-abc123.vercel.app
+  - Dashboard should load with demo data
+
+□ Step 3: Test upload
+  - On dashboard: Go to Admin tab (/06)
+  - Try uploading a real FieldSight ZIP
+  - Should say "✓ Uploaded"
+  - Dashboard should now show real data
+
+PART 4: SHARE WITH TEAM
+=======================
+
+□ Share your Vercel URL with PMM team
+  - https://fieldsight-abc123.vercel.app
+  - They visit the URL
+  - They see the dashboard with all shared data
+  - Password is baked in (they never need to enter it)
+
+DONE! 🎉
+
+WHAT HAPPENS NEXT:
+==================
+
+✓ You upload ZIPs via Admin tab
+✓ Backend parses and stores in data.json
+✓ All team members see updated data automatically
+✓ No database to manage
+✓ No configuration by team members
+✓ Cost: $0/month
+
+IF SOMETHING GOES WRONG:
+=======================
+
+Backend not responding:
+  → Check Railway: Deployments → Logs
+  → Check UPLOAD_PASSWORD is set in variables
+
+Dashboard shows empty:
+  → Check frontend URL is correct
+  → Check BACKEND_URL in the HTML is correct
+  → Check backend is running (test /health endpoint)
+
+Upload fails:
+  → Check password in UPLOAD_PASSWORD matches HTML
+  → Check ZIP has jobs.csv and conversation.csv
+  → Check Railway logs for errors
+
+QUESTIONS?
+==========
+
+Read DEPLOYMENT_SIMPLE.md for more details.
+
+You're done! 🚀

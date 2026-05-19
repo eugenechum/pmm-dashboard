@@ -1,0 +1,112 @@
+================================================================================
+COPY-PASTE COMMANDS FOR TERMINAL
+You can copy these directly into Terminal/PowerShell
+================================================================================
+
+IMPORTANT: Replace these placeholders with YOUR information:
+
+YOUR_USERNAME = your GitHub username (e.g., eugenetan)
+YOUR_PASSWORD = the password you set (e.g., MyFieldSight2024!)
+YOUR_BACKEND_URL = from Railway (e.g., https://fieldsight-abc123.railway.app)
+
+================================================================================
+PART 1: PUSH CODE TO GITHUB
+================================================================================
+
+Navigate to your folder first, then copy-paste EACH command separately:
+
+Command 1:
+git init
+
+Command 2:
+git add backend.js package.json .env.example .gitignore README.md
+
+Command 3:
+git commit -m "Initial commit"
+
+Command 4 (replace YOUR_USERNAME):
+git remote add origin https://github.com/YOUR_USERNAME/fieldsight-backend.git
+
+Command 5:
+git branch -M main
+
+Command 6:
+git push -u origin main
+
+GitHub will ask for username/password. Enter your GitHub credentials.
+
+================================================================================
+PART 2: BUILD DASHBOARD FOR DEPLOYMENT
+================================================================================
+
+Replace YOUR_BACKEND_URL and YOUR_PASSWORD with your actual values:
+
+For Mac/Linux:
+BACKEND_URL="YOUR_BACKEND_URL" \
+BACKEND_PASSWORD="YOUR_PASSWORD" \
+python3 assemble_v4.py
+
+For Windows (PowerShell):
+$env:BACKEND_URL="YOUR_BACKEND_URL"
+$env:BACKEND_PASSWORD="YOUR_PASSWORD"
+python assemble_v4.py
+
+Example (with real values):
+BACKEND_URL="https://fieldsight-abc123.railway.app" \
+BACKEND_PASSWORD="MyFieldSight2024!" \
+python3 assemble_v4.py
+
+================================================================================
+PART 3: TEST BACKEND
+================================================================================
+
+Copy your backend URL into browser address bar:
+
+https://YOUR_BACKEND_URL/health
+
+Replace YOUR_BACKEND_URL with your actual URL from Railway.
+
+You should see JSON response: {"ok":true,"timestamp":"..."}
+
+================================================================================
+PART 4: ONE-TIME SETUP COMPLETE
+================================================================================
+
+After deployment, you only need to run this when you rebuild the frontend:
+
+(For Mac/Linux)
+BACKEND_URL="YOUR_BACKEND_URL" \
+BACKEND_PASSWORD="YOUR_PASSWORD" \
+python3 assemble_v4.py
+
+Then upload the updated ninja_fieldsight_pmm_dashboard.html to Vercel.
+
+================================================================================
+EXAMPLE SESSION (Real commands with example values)
+================================================================================
+
+These are EXAMPLES. Replace the values with YOUR actual information.
+
+GITHUB SETUP:
+git init
+git add backend.js package.json .env.example .gitignore README.md
+git commit -m "Initial commit"
+git remote add origin https://github.com/eugenetan/fieldsight-backend.git
+git branch -M main
+git push -u origin main
+
+(When prompted, enter your GitHub username and password)
+
+BUILD FRONTEND (after Railway is deployed):
+BACKEND_URL="https://fieldsight-abc123.railway.app" \
+BACKEND_PASSWORD="MyFieldSight2024!" \
+python3 assemble_v4.py
+
+TEST BACKEND:
+Open browser → https://fieldsight-abc123.railway.app/health
+
+FUTURE UPLOADS (once per week):
+Just go to your Vercel URL and upload a ZIP via the Admin tab.
+No terminal commands needed.
+
+================================================================================
