@@ -3065,7 +3065,7 @@ function AdminTab({
     const sizeKb = Math.round(file.size / 1024);
     const sizeStr = sizeKb > 1024 ? (sizeKb / 1024).toFixed(1) + " MB" : sizeKb + " KB";
     try {
-      const API_PASSWORD = 'PMM2024!';
+      const API_PASSWORD = 'PMM2024';
       const API_URL = 'https://pmm-dashboard-production.up.railway.app';
       const formData = new FormData();
       formData.append('file', file);
@@ -3356,7 +3356,7 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const API_PASSWORD = 'PMM2024!';
+        const API_PASSWORD = 'PMM2024';
         const API_URL = 'https://pmm-dashboard-production.up.railway.app';
         const res = await fetch(API_URL + '/api/jobs', {
           headers: {
